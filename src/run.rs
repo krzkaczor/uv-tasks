@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,39 +32,101 @@ pub struct Invocation {
     pub deps: BTreeSet<String>,
 }
 
-fn uv_command(dir: &Path, step: &str) -> Command {
-    let mut cmd = Command::new("uv");
-    cmd.args(["run", "--directory"])
-        .arg(dir)
-        .args(["--", "sh", "-c", step]);
-    if let Some(path) = path_with_self() {
-        cmd.env("PATH", path);
+/// The environment applied to every spawned task: the workspace venv,
+/// activated by hand, plus markers for nested `ut` invocations.
+#[derive(Clone)]
+pub struct TaskEnv {
+    /// PATH = <ut binary dir> : <venv>/bin : inherited PATH. The ut dir comes
+    /// first so tasks can call bare `ut` (e.g. a root task fanning out with
+    /// `ut run -w test`) regardless of how `ut` itself was invoked.
+    path: OsString,
+    /// The project venv; exported as VIRTUAL_ENV.
+    venv: PathBuf,
+    /// Canonical workspace root; exported as UT_SYNCED so nested `ut`
+    /// invocations skip the redundant sync.
+    root: PathBuf,
+}
+
+impl TaskEnv {
+    pub fn new(root: &Path) -> TaskEnv {
+        let venv = venv_dir(root);
+        TaskEnv {
+            path: path_with(&venv.join("bin")),
+            venv,
+            root: root.to_path_buf(),
+        }
     }
+}
+
+/// The project environment, mirroring uv's resolution: UV_PROJECT_ENVIRONMENT
+/// (relative values resolved against the workspace root), else <root>/.venv.
+/// An active VIRTUAL_ENV is deliberately ignored, as uv does by default.
+fn venv_dir(root: &Path) -> PathBuf {
+    match std::env::var_os("UV_PROJECT_ENVIRONMENT") {
+        Some(v) if !v.is_empty() => {
+            let p = PathBuf::from(v);
+            if p.is_absolute() { p } else { root.join(p) }
+        }
+        _ => root.join(".venv"),
+    }
+}
+
+fn path_with(venv_bin: &Path) -> OsString {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths = Vec::new();
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
+        paths.push(dir);
+    }
+    paths.push(venv_bin.to_path_buf());
+    paths.extend(std::env::split_paths(&current));
+    std::env::join_paths(paths).unwrap_or(current)
+}
+
+fn task_command(dir: &Path, step: &str, env: &TaskEnv) -> Command {
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", step])
+        .current_dir(dir)
+        .env("PATH", &env.path)
+        .env("VIRTUAL_ENV", &env.venv)
+        .env("UT_SYNCED", &env.root);
     cmd
 }
 
-/// PATH with this executable's directory prepended, so tasks can call `ut`
-/// (e.g. a root task fanning out with `ut run -w test`) regardless of how
-/// `ut` itself was invoked.
-fn path_with_self() -> Option<std::ffi::OsString> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?.to_path_buf();
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    let paths = std::iter::once(dir).chain(std::env::split_paths(&current));
-    std::env::join_paths(paths).ok()
+/// Bring the whole workspace environment up to date in one shot, streaming
+/// uv's output (a fresh clone may download Python and every dependency).
+pub fn sync(root: &Path) -> Result<()> {
+    if color_enabled() {
+        eprintln!("{} {}", "$".dimmed(), "uv sync --all-packages".dimmed());
+    } else {
+        eprintln!("$ uv sync --all-packages");
+    }
+    let status = Command::new("uv")
+        .args(["sync", "--all-packages", "--directory"])
+        .arg(root)
+        // A stale activated venv would make uv warn about the mismatch.
+        .env_remove("VIRTUAL_ENV")
+        .status()
+        .context("failed to spawn uv; is it on PATH?")?;
+    if !status.success() {
+        anyhow::bail!("uv sync --all-packages failed ({status})");
+    }
+    Ok(())
 }
 
 /// Run a task in a single package with inherited stdio; returns the exit code.
-pub fn run_local(dir: &Path, steps: &[String]) -> Result<i32> {
+pub fn run_local(dir: &Path, steps: &[String], env: &TaskEnv) -> Result<i32> {
     for step in steps {
         if color_enabled() {
             eprintln!("{} {}", "$".dimmed(), step.bold());
         } else {
             eprintln!("$ {step}");
         }
-        let status = uv_command(dir, step)
+        let status = task_command(dir, step, env)
             .status()
-            .context("failed to spawn uv; is it on PATH?")?;
+            .context("failed to spawn sh")?;
         if !status.success() {
             return Ok(status.code().unwrap_or(1));
         }
@@ -89,7 +152,7 @@ const PALETTE: [AnsiColors; 6] = [
 /// starts only after all its `deps` succeeded. Fail-fast: after the first
 /// failure no new invocations launch (in-flight ones finish). Returns 0 on
 /// full success, 1 otherwise.
-pub fn run_workspace(invocations: Vec<Invocation>, jobs: usize) -> Result<i32> {
+pub fn run_workspace(invocations: Vec<Invocation>, jobs: usize, env: &TaskEnv) -> Result<i32> {
     let width = invocations.iter().map(|i| i.id.len()).max().unwrap_or(0);
     let colors: BTreeMap<String, AnsiColors> = invocations
         .iter()
@@ -127,9 +190,10 @@ pub fn run_workspace(invocations: Vec<Invocation>, jobs: usize) -> Result<i32> {
                 let prefix = paint(&format!("{:width$} | ", inv.id), colors[&inv.id]);
                 let print_tx = print_tx.clone();
                 let event_tx = event_tx.clone();
+                let env = env.clone();
                 running += 1;
                 thread::spawn(move || {
-                    let ok = run_streamed(&inv, &prefix, &print_tx);
+                    let ok = run_streamed(&inv, &prefix, &print_tx, &env);
                     let _ = event_tx.send((inv.id, ok));
                 });
             }
@@ -179,10 +243,15 @@ pub fn run_workspace(invocations: Vec<Invocation>, jobs: usize) -> Result<i32> {
 }
 
 /// Run one invocation's steps, streaming prefixed output. Returns success.
-fn run_streamed(inv: &Invocation, prefix: &str, print_tx: &mpsc::Sender<Line>) -> bool {
+fn run_streamed(
+    inv: &Invocation,
+    prefix: &str,
+    print_tx: &mpsc::Sender<Line>,
+    env: &TaskEnv,
+) -> bool {
     for step in &inv.steps {
         let _ = print_tx.send(Line::Out(format!("{prefix}$ {step}")));
-        let spawned = uv_command(&inv.dir, step)
+        let spawned = task_command(&inv.dir, step, env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -190,7 +259,7 @@ fn run_streamed(inv: &Invocation, prefix: &str, print_tx: &mpsc::Sender<Line>) -
         let mut child = match spawned {
             Ok(c) => c,
             Err(e) => {
-                let _ = print_tx.send(Line::Err(format!("{prefix}failed to spawn uv: {e}")));
+                let _ = print_tx.send(Line::Err(format!("{prefix}failed to spawn sh: {e}")));
                 return false;
             }
         };

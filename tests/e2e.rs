@@ -64,6 +64,12 @@ fn root_test_task_runs_tests_in_every_package() {
     let stdout = utf8(&out.get_output().stdout);
     let stderr = utf8(&out.get_output().stderr);
     assert!(stderr.contains("$ ut run -w test"), "stderr: {stderr}");
+    // The outer ut syncs once; the fanned-out inner ut skips via UT_SYNCED.
+    assert_eq!(
+        stderr.matches("$ uv sync --all-packages").count(),
+        1,
+        "stderr: {stderr}"
+    );
     for pkg in ["acme-core", "acme-api", "acme-worker"] {
         let passed = stdout
             .lines()
