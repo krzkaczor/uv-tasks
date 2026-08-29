@@ -1,8 +1,8 @@
-# ut
+# uv-tasks
 
 A task runner for [uv workspaces](https://docs.astral.sh/uv/concepts/projects/workspaces/), written in Rust. Think npm scripts plus `pnpm -r`, but native to `pyproject.toml`.
 
-uv has no task runner ([astral-sh/uv#5903](https://github.com/astral-sh/uv/issues/5903)) and no way to run a command in every workspace member. ut fills that gap: each package declares tasks in its own `pyproject.toml`, and ut runs them — in one package, or across the whole workspace in parallel while respecting the dependency graph.
+uv has no task runner ([astral-sh/uv#5903](https://github.com/astral-sh/uv/issues/5903)) and no way to run a command in every workspace member. uv-tasks fills that gap: each package declares tasks in its own `pyproject.toml`, and it runs them — in one package, or across the whole workspace in parallel while respecting the dependency graph.
 
 ## Install
 
@@ -47,11 +47,11 @@ ut list                    # members in dependency order, with their tasks
 - Runs in parallel by default, up to the number of logical CPUs. A member's task starts only after the tasks of all its workspace dependencies succeed — including through members that don't define the task.
 - Skips members that don't define the task, like `pnpm -r`.
 - Streams output line by line, prefixed with the member name.
-- Fails fast: after the first failure no new tasks start, in-flight tasks finish, and ut exits with code 1, listing failed and skipped members.
+- Fails fast: after the first failure no new tasks start, in-flight tasks finish, and `ut` exits with code 1, listing failed and skipped members.
 
 ## Design notes
 
-ut parses `[tool.uv.workspace]` itself and shells out to `uv` instead of linking uv's Rust crates. The `pyproject.toml` format and the uv CLI are uv's stable surfaces; the crates are explicitly unstable (versioned `0.0.x`, patch-bumped on every uv release). ut only needs workspace metadata — members, names, dependency edges — which is a small amount of TOML and glob parsing.
+uv-tasks parses `[tool.uv.workspace]` itself and shells out to `uv` instead of linking uv's Rust crates. The `pyproject.toml` format and the uv CLI are uv's stable surfaces; the crates are explicitly unstable (versioned `0.0.x`, patch-bumped on every uv release). uv-tasks only needs workspace metadata — members, names, dependency edges — which is a small amount of TOML and glob parsing.
 
 Known limitations:
 
