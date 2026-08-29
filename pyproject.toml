@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ut-runner"
+description = "A task runner for uv workspaces: tasks in pyproject.toml, parallel runs over the workspace dependency graph"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Krzysztof Kaczor", email = "chris@kaczor.io" }]
+keywords = ["uv", "task-runner", "workspace", "monorepo"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Rust",
+]
+requires-python = ">=3.8"
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/krzkaczor/ut"
+
+[tool.maturin]
+bindings = "bin"
+strip = true

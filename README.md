@@ -4,6 +4,14 @@ A task runner for [uv workspaces](https://docs.astral.sh/uv/concepts/projects/wo
 
 uv has no task runner ([astral-sh/uv#5903](https://github.com/astral-sh/uv/issues/5903)) and no way to run a command in every workspace member. ut fills that gap: each package declares tasks in its own `pyproject.toml`, and ut runs them — in one package, or across the whole workspace in parallel while respecting the dependency graph.
 
+## Install
+
+```sh
+uv tool install ut-runner
+```
+
+The PyPI distribution is named `ut-runner` (`ut` was taken); the installed command is `ut`. The wheels ship a prebuilt binary for macOS and Linux — no Rust toolchain needed. `pipx install ut-runner` and `pip install ut-runner` work too.
+
 ## Define tasks
 
 Add a `[tool.ut.tasks]` table to a workspace member's `pyproject.toml`:
@@ -60,3 +68,7 @@ cargo test      # unit + integration tests (integration tests stub uv on PATH)
 cargo clippy --all-targets
 cargo fmt
 ```
+
+## Release
+
+Pushing a git tag builds macOS (arm64, x86_64) and manylinux (x86_64, aarch64) wheels plus an sdist, and publishes them to PyPI through trusted publishing (`.github/workflows/release.yml`). The version comes from `Cargo.toml`. To release: bump the version, commit, tag, push the tag.
