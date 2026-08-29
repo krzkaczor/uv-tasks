@@ -36,7 +36,21 @@ fn uv_command(dir: &Path, step: &str) -> Command {
     cmd.args(["run", "--directory"])
         .arg(dir)
         .args(["--", "sh", "-c", step]);
+    if let Some(path) = path_with_self() {
+        cmd.env("PATH", path);
+    }
     cmd
+}
+
+/// PATH with this executable's directory prepended, so tasks can call `ut`
+/// (e.g. a root task fanning out with `ut run -w test`) regardless of how
+/// `ut` itself was invoked.
+fn path_with_self() -> Option<std::ffi::OsString> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.to_path_buf();
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let paths = std::iter::once(dir).chain(std::env::split_paths(&current));
+    std::env::join_paths(paths).ok()
 }
 
 /// Run a task in a single package with inherited stdio; returns the exit code.

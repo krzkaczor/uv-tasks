@@ -2,14 +2,14 @@ mod run;
 mod tasks;
 mod workspace;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use usage::{Args, Cli, Run, Subcommands};
 
 use crate::run::Invocation;
-use crate::tasks::with_args;
+use crate::tasks::{Task, with_args};
 use crate::workspace::{Workspace, normalize};
 
 /// ut — a task runner for uv workspaces
@@ -116,14 +116,16 @@ fn run_task(cmd: RunCmd) -> Result<i32> {
 
 fn run_in_current_package(ws: &Workspace, cmd: RunCmd) -> Result<i32> {
     let cwd = std::env::current_dir()?.canonicalize()?;
-    let member = ws.member_containing(&cwd).with_context(|| {
-        format!(
-            "current directory is not inside a workspace member of {}",
+    let (tasks, label, dir) = match ws.member_containing(&cwd) {
+        Some(m) => (&m.tasks, format!("package {:?}", m.name), &m.dir),
+        None if cwd.starts_with(&ws.root) => (&ws.root_tasks, "workspace root".into(), &ws.root),
+        None => bail!(
+            "current directory is not inside workspace {}",
             ws.root.display()
-        )
-    })?;
-    let steps = task_steps(member, &cmd.task, &cmd.args)?;
-    run::run_local(&member.dir, &steps)
+        ),
+    };
+    let steps = task_steps(tasks, &label, &cmd.task, &cmd.args)?;
+    run::run_local(dir, &steps)
 }
 
 fn run_across_workspace(ws: &Workspace, cmd: &RunCmd) -> Result<i32> {
@@ -151,7 +153,12 @@ fn run_across_workspace(ws: &Workspace, cmd: &RunCmd) -> Result<i32> {
             Ok(Invocation {
                 id: m.id.clone(),
                 dir: m.dir.clone(),
-                steps: task_steps(m, &cmd.task, &cmd.args)?,
+                steps: task_steps(
+                    &m.tasks,
+                    &format!("package {:?}", m.name),
+                    &cmd.task,
+                    &cmd.args,
+                )?,
                 // Order through members outside the selection still holds:
                 // transitive deps, restricted to selected members.
                 deps: ws
@@ -172,16 +179,14 @@ fn thread_count() -> usize {
 }
 
 fn task_steps(
-    member: &crate::workspace::Member,
+    tasks: &BTreeMap<String, Task>,
+    label: &str,
     task: &str,
     args: &[String],
 ) -> Result<Vec<String>> {
-    let def = member.tasks.get(task).with_context(|| {
-        format!(
-            "package {:?} has no task {task:?} in [tool.ut.tasks]",
-            member.name
-        )
-    })?;
+    let def = tasks
+        .get(task)
+        .with_context(|| format!("{label} has no task {task:?} in [tool.ut.tasks]"))?;
     if def.is_sequence() && !args.is_empty() {
         bail!("task {task:?} is a sequence; passthrough arguments are not supported");
     }
@@ -190,21 +195,20 @@ fn task_steps(
 
 fn list() -> Result<i32> {
     let ws = discover()?;
-    let name_w = ws.members.iter().map(|m| m.name.len()).max().unwrap_or(0);
-    let dir_w = ws
-        .members
-        .iter()
-        .map(|m| rel(&m.dir, &ws.root).len())
-        .max()
-        .unwrap_or(0);
+    // (name, relative dir, tasks); the root comes first when it defines tasks.
+    let mut rows: Vec<(&str, String, &BTreeMap<String, Task>)> = Vec::new();
+    if !ws.root_tasks.is_empty() {
+        let name = ws.root_name.as_deref().unwrap_or("(root)");
+        rows.push((name, rel(&ws.root, &ws.root), &ws.root_tasks));
+    }
     for m in &ws.members {
-        let tasks: Vec<&str> = m.tasks.keys().map(String::as_str).collect();
-        println!(
-            "{:name_w$}  {:dir_w$}  {}",
-            m.name,
-            rel(&m.dir, &ws.root),
-            tasks.join(", ")
-        );
+        rows.push((&m.name, rel(&m.dir, &ws.root), &m.tasks));
+    }
+    let name_w = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
+    let dir_w = rows.iter().map(|r| r.1.len()).max().unwrap_or(0);
+    for (name, dir, tasks) in rows {
+        let tasks: Vec<&str> = tasks.keys().map(String::as_str).collect();
+        println!("{name:name_w$}  {dir:dir_w$}  {}", tasks.join(", "));
     }
     Ok(0)
 }

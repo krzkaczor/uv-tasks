@@ -26,6 +26,7 @@ jobs:
           components: clippy, rustfmt
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
+      - uses: astral-sh/setup-uv@v7
       - run: cargo test
 
   linux:
