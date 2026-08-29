@@ -32,7 +32,7 @@ test = "ut run -w test"                  # run every member's "test"
 check = ["ut run -w lint", "ut run -w test"]
 ```
 
-Commands run through `uv run --directory <package> -- sh -c '<command>'`, so they get the package's environment and full shell semantics.
+Commands run through `uv run --directory <package> -- sh -c '<command>'`, so they get the package's environment and full shell semantics. The directory containing `ut` itself is prepended to `PATH`, so tasks can call `ut` even if it isn't on your `PATH`.
 
 ## Run tasks
 

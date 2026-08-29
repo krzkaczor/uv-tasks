@@ -33,8 +33,9 @@ fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `ut` with the real `uv` on PATH and the freshly built `ut` binary dir
-/// prepended, so root tasks can shell out to `ut run -w ...`.
+/// `ut` with the real `uv` on PATH. The `ut` binary itself is deliberately
+/// not added: ut prepends its own directory to the PATH of spawned tasks, so
+/// the root's `ut run -w ...` resolves to this same build.
 fn ut(dir: &Path) -> Command {
     let system_path = std::env::var("PATH").unwrap_or_default();
     let has_uv = std::env::split_paths(&system_path).any(|p| p.join("uv").is_file());
@@ -42,13 +43,9 @@ fn ut(dir: &Path) -> Command {
         has_uv,
         "the e2e tests need `uv` on PATH (https://docs.astral.sh/uv/getting-started/installation/)"
     );
-    let ut_dir = assert_cmd::cargo::cargo_bin("ut")
-        .parent()
-        .unwrap()
-        .to_path_buf();
     let mut cmd = Command::cargo_bin("ut").unwrap();
     cmd.current_dir(dir)
-        .env("PATH", format!("{}:{system_path}", ut_dir.display()))
+        .env("PATH", system_path)
         .env("NO_COLOR", "1")
         .timeout(Duration::from_secs(600));
     cmd

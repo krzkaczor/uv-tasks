@@ -310,16 +310,6 @@ fn workspace_output_lines_are_prefixed() {
     assert!(stdout.contains("zeta | tested-zeta"), "got: {stdout}");
 }
 
-/// PATH with the fake uv first and the freshly built `ut` binary second, so a
-/// root task can shell out to `ut run -w ...`.
-fn path_with_ut(fake_uv_path: &str) -> String {
-    let ut_dir = assert_cmd::cargo::cargo_bin("ut")
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    format!("{}:{fake_uv_path}", ut_dir.display())
-}
-
 fn set_root(root: &Path, contents: &str) {
     fs::write(root.join("pyproject.toml"), contents).unwrap();
 }
@@ -340,8 +330,9 @@ test = "ut run -w test"
 #[test]
 fn root_task_fans_out_to_members() {
     let ws = fixture();
+    // Note: `ut` is deliberately not on PATH here; ut puts its own directory
+    // on the PATH of spawned tasks so `ut run -w test` resolves regardless.
     let (_bin, path) = fake_uv_bin();
-    let path = path_with_ut(&path);
     set_root(ws.path(), ROOT_WITH_TASKS);
     set_task(ws.path(), "mid", "test = \"echo tested-mid\"");
 
