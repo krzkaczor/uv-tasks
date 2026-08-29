@@ -1,0 +1,62 @@
+# ut
+
+A task runner for [uv workspaces](https://docs.astral.sh/uv/concepts/projects/workspaces/), written in Rust. Think npm scripts plus `pnpm -r`, but native to `pyproject.toml`.
+
+uv has no task runner ([astral-sh/uv#5903](https://github.com/astral-sh/uv/issues/5903)) and no way to run a command in every workspace member. ut fills that gap: each package declares tasks in its own `pyproject.toml`, and ut runs them — in one package, or across the whole workspace in parallel while respecting the dependency graph.
+
+## Define tasks
+
+Add a `[tool.ut.tasks]` table to a workspace member's `pyproject.toml`:
+
+```toml
+[tool.ut.tasks]
+test = "pytest -s"
+typecheck = "ty check ."
+check = ["ruff check .", "ty check ."]   # a sequence: stops at the first failure
+```
+
+Commands run through `uv run --directory <package> -- sh -c '<command>'`, so they get the package's environment and full shell semantics.
+
+## Run tasks
+
+```sh
+ut test                    # run "test" in the package containing the current directory
+ut test -- -k "scope"      # extra args are appended to the command
+ut run -w test             # run "test" in every member that defines it
+ut run -w --filter pkg test  # restrict to the named package(s)
+ut run -w -j 1 test        # limit concurrency (1 = sequential)
+ut list                    # members in dependency order, with their tasks
+```
+
+`ut <task>` is shorthand for `ut run <task>`. If a task name collides with a built-in subcommand (`run`, `list`, `completion`, `help`), use the explicit `ut run <task>` form.
+
+### Workspace runs
+
+`ut run -w <task>`:
+
+- Discovers members from `[tool.uv.workspace]` in the root `pyproject.toml` (glob `members`, `exclude`, and the root itself when it has a `[project]` table).
+- Builds the dependency graph from `[tool.uv.sources] <name> = { workspace = true }` entries, with requirement-name matching as a fallback.
+- Runs in parallel by default, up to the number of logical CPUs. A member's task starts only after the tasks of all its workspace dependencies succeed — including through members that don't define the task.
+- Skips members that don't define the task, like `pnpm -r`.
+- Streams output line by line, prefixed with the member name.
+- Fails fast: after the first failure no new tasks start, in-flight tasks finish, and ut exits with code 1, listing failed and skipped members.
+
+## Design notes
+
+ut parses `[tool.uv.workspace]` itself and shells out to `uv` instead of linking uv's Rust crates. The `pyproject.toml` format and the uv CLI are uv's stable surfaces; the crates are explicitly unstable (versioned `0.0.x`, patch-bumped on every uv release). ut only needs workspace metadata — members, names, dependency edges — which is a small amount of TOML and glob parsing.
+
+Known limitations:
+
+- Tasks run through `sh -c`, so Windows isn't supported.
+- Passthrough args work only for string-form tasks, not sequences.
+- Concurrent `uv run` invocations in one workspace share a venv; uv serializes syncs with a lock. If sync churn becomes a problem, run `uv sync` once and define tasks with `uv run --no-sync`.
+
+Not yet implemented: task-level `depends`, pre/post hooks, root-level task templates, continue-on-error (`--no-bail`), buffered per-package output.
+
+## Develop
+
+```sh
+cargo test      # unit + integration tests (integration tests stub uv on PATH)
+cargo clippy --all-targets
+cargo fmt
+```

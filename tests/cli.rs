@@ -122,6 +122,18 @@ fn runs_task_in_current_package() {
 }
 
 #[test]
+fn bare_task_shorthand_without_run_subcommand() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+
+    ut(&ws.path().join("pkgs/zeta"), &path)
+        .arg("build")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("built-zeta"));
+}
+
+#[test]
 fn appends_passthrough_args() {
     let ws = fixture();
     let (_bin, path) = fake_uv_bin();

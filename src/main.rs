@@ -17,7 +17,11 @@ use crate::workspace::{Workspace, normalize};
 #[usage(bin = "ut", version = "0.1.0", completion)]
 struct UtCli {
     #[usage(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+    /// Task name (shorthand for `ut run <task>`)
+    task: Option<String>,
+    /// Extra arguments appended to the task command
+    args: Vec<String>,
 }
 
 #[derive(Subcommands)]
@@ -215,5 +219,21 @@ fn rel(dir: &Path, root: &Path) -> String {
 }
 
 fn main() {
-    std::process::exit(UtCli::parse().command.run())
+    let cli = UtCli::parse();
+    let code = match (cli.command, cli.task) {
+        (Some(command), _) => command.run(),
+        (None, Some(task)) => RunCmd {
+            workspace: false,
+            filter: vec![],
+            jobs: None,
+            task,
+            args: cli.args,
+        }
+        .run(),
+        (None, None) => {
+            eprintln!("ut: error: no task or subcommand given (try `ut list` or `ut --help`)");
+            2
+        }
+    };
+    std::process::exit(code)
 }
