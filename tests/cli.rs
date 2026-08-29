@@ -309,3 +309,103 @@ fn workspace_output_lines_are_prefixed() {
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(stdout.contains("zeta | tested-zeta"), "got: {stdout}");
 }
+
+/// PATH with the fake uv first and the freshly built `ut` binary second, so a
+/// root task can shell out to `ut run -w ...`.
+fn path_with_ut(fake_uv_path: &str) -> String {
+    let ut_dir = assert_cmd::cargo::cargo_bin("ut")
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    format!("{}:{fake_uv_path}", ut_dir.display())
+}
+
+fn set_root(root: &Path, contents: &str) {
+    fs::write(root.join("pyproject.toml"), contents).unwrap();
+}
+
+const ROOT_WITH_TASKS: &str = r#"
+[project]
+name = "root"
+version = "0.1.0"
+
+[tool.uv.workspace]
+members = ["pkgs/*"]
+exclude = ["pkgs/skipme"]
+
+[tool.ut.tasks]
+test = "ut run -w test"
+"#;
+
+#[test]
+fn root_task_fans_out_to_members() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    let path = path_with_ut(&path);
+    set_root(ws.path(), ROOT_WITH_TASKS);
+    set_task(ws.path(), "mid", "test = \"echo tested-mid\"");
+
+    let out = ut(ws.path(), &path)
+        .args(["run", "test"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("zeta | tested-zeta"), "got: {stdout}");
+    assert!(stdout.contains("mid  | tested-mid"), "got: {stdout}");
+    // The root is never a -w target, so its own `test` doesn't recurse.
+    assert!(!stdout.contains("root |"), "got: {stdout}");
+
+    let out = ut(ws.path(), &path)
+        .args(["run", "-w", "test"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(!stdout.contains("root |"), "got: {stdout}");
+}
+
+#[test]
+fn list_shows_root_separately_and_not_as_member() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    set_root(ws.path(), ROOT_WITH_TASKS);
+
+    let out = ut(ws.path(), &path).arg("list").assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(lines[0].starts_with("root"), "got: {stdout}");
+    assert!(lines[0].contains("  .  "), "got: {stdout}");
+    assert!(lines[0].ends_with("test"), "got: {stdout}");
+    assert!(lines[1].starts_with("mid"), "got: {stdout}");
+    assert_eq!(lines.len(), 4, "got: {stdout}");
+
+    // A root without tasks doesn't get a line, even if it has [project].
+    set_root(
+        ws.path(),
+        "[project]\nname = \"root\"\nversion = \"0.1.0\"\n[tool.uv.workspace]\nmembers = [\"pkgs/*\"]\n",
+    );
+    let out = ut(ws.path(), &path).arg("list").assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(!stdout.contains("root"), "got: {stdout}");
+}
+
+#[test]
+fn root_task_runs_from_virtual_root() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    set_root(
+        ws.path(),
+        "[tool.uv.workspace]\nmembers = [\"pkgs/*\"]\n[tool.ut.tasks]\nhello = \"echo hi-from-root\"\n",
+    );
+
+    ut(ws.path(), &path)
+        .arg("hello")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("hi-from-root"));
+
+    ut(ws.path(), &path)
+        .arg("nosuch")
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("workspace root has no task"));
+}

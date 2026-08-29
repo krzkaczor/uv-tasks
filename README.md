@@ -23,12 +23,22 @@ typecheck = "ty check ."
 check = ["ruff check .", "ty check ."]   # a sequence: stops at the first failure
 ```
 
+The workspace root can define tasks too, typically to fan out across the workspace:
+
+```toml
+# root pyproject.toml
+[tool.ut.tasks]
+test = "ut run -w test"                  # run every member's "test"
+check = ["ut run -w lint", "ut run -w test"]
+```
+
 Commands run through `uv run --directory <package> -- sh -c '<command>'`, so they get the package's environment and full shell semantics.
 
 ## Run tasks
 
 ```sh
 ut test                    # run "test" in the package containing the current directory
+                           # (or the root's "test" when run from the workspace root)
 ut test -- -k "scope"      # extra args are appended to the command
 ut run -w test             # run "test" in every member that defines it
 ut run -w --filter pkg test  # restrict to the named package(s)
@@ -42,7 +52,7 @@ ut list                    # members in dependency order, with their tasks
 
 `ut run -w <task>`:
 
-- Discovers members from `[tool.uv.workspace]` in the root `pyproject.toml` (glob `members`, `exclude`, and the root itself when it has a `[project]` table).
+- Discovers members from `[tool.uv.workspace]` in the root `pyproject.toml` (glob `members`, `exclude`). The root itself is never a `-w` target, like `pnpm -r`: root tasks run with `ut <task>` from the root and can fan out with `ut run -w <task>` without recursing into themselves.
 - Builds the dependency graph from `[tool.uv.sources] <name> = { workspace = true }` entries, with requirement-name matching as a fallback.
 - Runs in parallel by default, up to the number of logical CPUs; pass `-s`/`--sequential` to run one member at a time. A member's task starts only after the tasks of all its workspace dependencies succeed — including through members that don't define the task.
 - Skips members that don't define the task, like `pnpm -r`.
@@ -59,12 +69,12 @@ Known limitations:
 - Passthrough args work only for string-form tasks, not sequences.
 - Concurrent `uv run` invocations in one workspace share a venv; uv serializes syncs with a lock. If sync churn becomes a problem, run `uv sync` once and define tasks with `uv run --no-sync`.
 
-Not yet implemented: task-level `depends`, pre/post hooks, root-level task templates, continue-on-error (`--no-bail`), buffered per-package output.
+Not yet implemented: task-level `depends`, pre/post hooks, continue-on-error (`--no-bail`), buffered per-package output.
 
 ## Develop
 
 ```sh
-cargo test      # unit + integration tests (integration tests stub uv on PATH)
+cargo test      # unit + integration tests; tests/cli.rs stubs uv, tests/e2e.rs needs the real uv on PATH
 cargo clippy --all-targets
 cargo fmt
 ```

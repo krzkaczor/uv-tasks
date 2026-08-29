@@ -64,10 +64,18 @@ pub struct Member {
     pub deps: BTreeSet<String>,
 }
 
+/// A uv workspace. The root is deliberately *not* a member: it is the
+/// orchestrator, so `-w` runs target child packages only (like `pnpm -r`).
+/// Root tasks run with `ut <task>` from the root directory and typically fan
+/// out with `ut run -w <task>` — without recursing into themselves.
 #[derive(Debug)]
 pub struct Workspace {
     pub root: PathBuf,
-    /// Members in deterministic topological order: dependencies before
+    /// `[project.name]` of the root, if it has a `[project]` table.
+    pub root_name: Option<String>,
+    /// `[tool.ut.tasks]` of the root pyproject.toml (virtual roots included).
+    pub root_tasks: BTreeMap<String, Task>,
+    /// Child members in deterministic topological order: dependencies before
     /// dependents, ties broken by id.
     pub members: Vec<Member>,
 }
@@ -136,13 +144,9 @@ impl Workspace {
         }
 
         let mut members = Vec::new();
-        // The workspace root is itself a member when it has a [project] table.
-        if root_doc.project.is_some() {
-            members.push(build_member(root.to_path_buf(), root_doc));
-        }
         for dir in member_dirs {
             if dir == root {
-                continue;
+                continue; // the root is never a member, even if a glob matches it
             }
             let manifest = dir.join("pyproject.toml");
             if !manifest.is_file() {
@@ -169,6 +173,8 @@ impl Workspace {
         let members = toposort(members)?;
         Ok(Workspace {
             root: root.to_path_buf(),
+            root_name: root_doc.project.map(|p| p.name),
+            root_tasks: root_doc.tool.ut.tasks,
             members,
         })
     }
