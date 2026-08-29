@@ -1,6 +1,6 @@
-//! End-to-end tests against the real `uv`: a production-like workspace whose
-//! root `test` task fans out to every child package. Requires `uv` on PATH;
-//! the first run downloads pytest and hatchling.
+//! End-to-end tests against the real `uv`, using the workspace checked in at
+//! `tests/fixtures/acme`: a root whose `test` task fans out to every child
+//! package. Requires `uv` on PATH; the first run downloads pytest and hatchling.
 
 use std::fs;
 use std::path::Path;
@@ -9,100 +9,28 @@ use std::time::Duration;
 use assert_cmd::Command;
 use tempfile::TempDir;
 
-/// acme/                       root app: `test = "ut run -w test"`
-///   packages/acme-core        no deps
-///   packages/acme-api         depends on acme-core
-///   services/acme-worker      depends on acme-api
+/// Copy `tests/fixtures/acme` (a production-like workspace: root `acme` whose
+/// `test` fans out to `acme-core` <- `acme-api` <- `acme-worker`) into a temp
+/// dir, since the tests mutate it and uv writes `.venv`/`uv.lock` into it.
 fn fixture() -> TempDir {
     let tmp = TempDir::new().unwrap();
-    let root = tmp.path();
-    fs::write(
-        root.join("pyproject.toml"),
-        r#"
-[project]
-name = "acme"
-version = "0.1.0"
-requires-python = ">=3.9"
-
-[tool.uv]
-package = false
-
-[tool.uv.workspace]
-members = ["packages/*", "services/*"]
-
-[tool.ut.tasks]
-test = "ut run -w test"
-check = ["ut run -w lint", "ut run -w test"]
-"#,
-    )
-    .unwrap();
-
-    package(
-        root,
-        "packages/acme-core",
-        "acme-core",
-        None,
-        "def add(a, b):\n    return a + b\n",
-        "from acme_core import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n",
-    );
-    package(
-        root,
-        "packages/acme-api",
-        "acme-api",
-        Some("acme-core"),
-        "from acme_core import add\n\n\ndef handle(a, b):\n    return {\"sum\": add(a, b)}\n",
-        "from acme_api import handle\nfrom acme_core import add\n\n\ndef test_handle():\n    assert handle(1, 2) == {\"sum\": add(1, 2)}\n",
-    );
-    package(
-        root,
-        "services/acme-worker",
-        "acme-worker",
-        Some("acme-api"),
-        "from acme_api import handle\n\n\ndef work(job):\n    return handle(*job)\n",
-        "from acme_api import handle\nfrom acme_worker import work\n\n\ndef test_work():\n    assert work((4, 5)) == handle(4, 5)\n",
-    );
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/acme");
+    copy_dir(&src, tmp.path()).unwrap();
     tmp
 }
 
-fn package(root: &Path, rel: &str, name: &str, dep: Option<&str>, src: &str, test: &str) {
-    let dir = root.join(rel);
-    let module = name.replace('-', "_");
-    fs::create_dir_all(dir.join("src").join(&module)).unwrap();
-    fs::create_dir_all(dir.join("tests")).unwrap();
-    fs::write(dir.join("src").join(&module).join("__init__.py"), src).unwrap();
-    fs::write(dir.join("tests").join(format!("test_{module}.py")), test).unwrap();
-
-    let (deps, sources) = match dep {
-        Some(d) => (
-            format!("dependencies = [\"{d}\"]"),
-            format!("[tool.uv.sources]\n{d} = {{ workspace = true }}\n"),
-        ),
-        None => ("dependencies = []".to_string(), String::new()),
-    };
-    fs::write(
-        dir.join("pyproject.toml"),
-        format!(
-            r#"[project]
-name = "{name}"
-version = "0.1.0"
-requires-python = ">=3.9"
-{deps}
-
-{sources}
-[dependency-groups]
-dev = ["pytest>=8"]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.ut.tasks]
-test = "echo {name} >> ../../order.log && pytest -q"
-lint = "python -c 'import {module}'"
-"#
-        ),
-    )
-    .unwrap();
+fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let target = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 /// `ut` with the real `uv` on PATH and the freshly built `ut` binary dir

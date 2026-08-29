@@ -1,0 +1,18 @@
+[project]
+name = "acme-api"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = ["acme-core"]
+[tool.uv.sources]
+acme-core = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ut.tasks]
+test = "echo acme-api >> ../../order.log && pytest -q"
+lint = "python -c 'import acme_api'"

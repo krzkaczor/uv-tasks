@@ -1,0 +1,16 @@
+# Root of a production-like uv workspace used by tests/e2e.rs.
+# The root only orchestrates: its tasks fan out to the members with `ut run -w`.
+[project]
+name = "acme"
+version = "0.1.0"
+requires-python = ">=3.9"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+[tool.ut.tasks]
+test = "ut run -w test"
+check = ["ut run -w lint", "ut run -w test"]

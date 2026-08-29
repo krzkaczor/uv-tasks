@@ -74,7 +74,7 @@ Not yet implemented: task-level `depends`, pre/post hooks, continue-on-error (`-
 ## Develop
 
 ```sh
-cargo test      # unit + integration tests; tests/cli.rs stubs uv, tests/e2e.rs needs the real uv on PATH
+cargo test      # unit + integration tests; tests/cli.rs stubs uv, tests/e2e.rs runs the real uv against tests/fixtures/acme
 cargo clippy --all-targets
 cargo fmt
 ```

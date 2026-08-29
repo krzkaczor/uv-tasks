@@ -1,2 +1,7 @@
 /target
 dist/
+
+# uv artifacts if someone runs uv directly inside the e2e fixture
+tests/fixtures/**/.venv/
+tests/fixtures/**/uv.lock
+tests/fixtures/**/__pycache__/
