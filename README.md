@@ -6,11 +6,13 @@ uv has no task runner ([astral-sh/uv#5903](https://github.com/astral-sh/uv/issue
 
 ## Install
 
+Add it as a dev dependency in the workspace root:
+
 ```sh
-uv tool install uv-tasks
+uv add --dev uv-tasks
 ```
 
-The PyPI distribution is named `uv-tasks`; the installed command is `ut`. The wheels ship a prebuilt binary for macOS and Linux — no Rust toolchain needed. `pipx install uv-tasks` and `pip install uv-tasks` work too.
+The PyPI distribution is named `uv-tasks`; the installed command is `ut`, invoked as `uv run ut ...`. The wheels ship a prebuilt binary for macOS and Linux — no Rust toolchain needed. Everyone on the team gets the pinned version automatically on `uv sync`.
 
 ## Define tasks
 
@@ -32,21 +34,21 @@ test = "ut run -w test"                  # run every member's "test"
 check = ["ut run -w lint", "ut run -w test"]
 ```
 
-Commands run through `uv run --directory <package> -- sh -c '<command>'`, so they get the package's environment and full shell semantics. The directory containing `ut` itself is prepended to `PATH`, so tasks can call `ut` even if it isn't on your `PATH`.
+Commands run through `uv run --directory <package> -- sh -c '<command>'`, so they get the package's environment and full shell semantics. The directory containing `ut` itself is prepended to `PATH`, so task definitions call bare `ut` (as above) even though it only lives in the project venv.
 
 ## Run tasks
 
 ```sh
-ut test                    # run "test" in the package containing the current directory
-                           # (or the root's "test" when run from the workspace root)
-ut test -- -k "scope"      # extra args are appended to the command
-ut run -w test             # run "test" in every member that defines it
-ut run -w --filter pkg test  # restrict to the named package(s)
-ut run -w -s test          # run sequentially instead of in parallel
-ut list                    # members in dependency order, with their tasks
+uv run ut test                    # run "test" in the package containing the current directory
+                                  # (or the root's "test" when run from the workspace root)
+uv run ut test -- -k "scope"      # extra args are appended to the command
+uv run ut run -w test             # run "test" in every member that defines it
+uv run ut run -w --filter pkg test  # restrict to the named package(s)
+uv run ut run -w -s test          # run sequentially instead of in parallel
+uv run ut list                    # members in dependency order, with their tasks
 ```
 
-`ut <task>` is shorthand for `ut run <task>`. If a task name collides with a built-in subcommand (`run`, `list`, `completion`, `help`), use the explicit `ut run <task>` form.
+`ut <task>` is shorthand for `ut run <task>`, so `uv run ut test` and `uv run ut run test` are equivalent. If a task name collides with a built-in subcommand (`run`, `list`, `completion`, `help`), use the explicit `ut run <task>` form.
 
 ### Workspace runs
 
