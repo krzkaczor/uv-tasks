@@ -231,11 +231,11 @@ fn workspace_run_is_parallel_for_independent_members() {
 }
 
 #[test]
-fn workspace_run_sequential_with_j1() {
+fn workspace_run_sequential_with_s() {
     let ws = fixture();
     let (_bin, path) = fake_uv_bin();
-    let log = ws.path().join("j1.log");
-    // With -j 1 each task fully finishes before the next starts, so start/end
+    let log = ws.path().join("seq.log");
+    // With -s each task fully finishes before the next starts, so start/end
     // markers never interleave; this holds deterministically regardless of
     // machine speed.
     let logging = |name: &str| {
@@ -249,7 +249,7 @@ fn workspace_run_sequential_with_j1() {
     set_task(ws.path(), "alpha", "other = \"echo nope\"");
 
     ut(ws.path(), &path)
-        .args(["run", "-w", "-j", "1", "build"])
+        .args(["run", "-w", "-s", "build"])
         .assert()
         .success();
 
