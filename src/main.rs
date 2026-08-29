@@ -107,14 +107,24 @@ fn discover() -> Result<Workspace> {
 
 fn run_task(cmd: RunCmd) -> Result<i32> {
     let ws = discover()?;
+    if !synced_by_parent(&ws.root) {
+        run::sync(&ws.root)?;
+    }
+    let env = run::TaskEnv::new(&ws.root);
     if cmd.workspace {
-        run_across_workspace(&ws, &cmd)
+        run_across_workspace(&ws, &cmd, &env)
     } else {
-        run_in_current_package(&ws, cmd)
+        run_in_current_package(&ws, cmd, &env)
     }
 }
 
-fn run_in_current_package(ws: &Workspace, cmd: RunCmd) -> Result<i32> {
+/// A parent `ut` already synced this workspace (root task fan-out): every
+/// spawned task carries UT_SYNCED=<canonical workspace root>.
+fn synced_by_parent(root: &Path) -> bool {
+    std::env::var_os("UT_SYNCED").is_some_and(|v| Path::new(&v) == root)
+}
+
+fn run_in_current_package(ws: &Workspace, cmd: RunCmd, env: &run::TaskEnv) -> Result<i32> {
     let cwd = std::env::current_dir()?.canonicalize()?;
     let (tasks, label, dir) = match ws.member_containing(&cwd) {
         Some(m) => (&m.tasks, format!("package {:?}", m.name), &m.dir),
@@ -125,10 +135,10 @@ fn run_in_current_package(ws: &Workspace, cmd: RunCmd) -> Result<i32> {
         ),
     };
     let steps = task_steps(tasks, &label, &cmd.task, &cmd.args)?;
-    run::run_local(dir, &steps)
+    run::run_local(dir, &steps, env)
 }
 
-fn run_across_workspace(ws: &Workspace, cmd: &RunCmd) -> Result<i32> {
+fn run_across_workspace(ws: &Workspace, cmd: &RunCmd, env: &run::TaskEnv) -> Result<i32> {
     let filter: BTreeSet<String> = cmd.filter.iter().map(|f| normalize(f)).collect();
     for f in &filter {
         if ws.member(f).is_none() {
@@ -171,7 +181,7 @@ fn run_across_workspace(ws: &Workspace, cmd: &RunCmd) -> Result<i32> {
         .collect::<Result<_>>()?;
 
     let jobs = if cmd.sequential { 1 } else { thread_count() };
-    run::run_workspace(invocations, jobs)
+    run::run_workspace(invocations, jobs, env)
 }
 
 fn thread_count() -> usize {

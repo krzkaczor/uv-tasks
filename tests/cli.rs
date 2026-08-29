@@ -54,14 +54,15 @@ fn member(root: &Path, name: &str, extra: &str, tasks: &str) {
     .unwrap();
 }
 
-/// A fake `uv` on PATH that emulates `uv run --directory <dir> -- sh -c <cmd>`
-/// so tests need no network, Python, or real uv.
+/// A fake `uv` on PATH that records its invocations (only `uv sync` reaches
+/// uv now — tasks spawn directly) so tests need no network, Python, or real
+/// uv. Logs args to $FAKE_UV_LOG when set; fails when $FAKE_UV_FAIL is set.
 fn fake_uv_bin() -> (TempDir, String) {
     let tmp = TempDir::new().unwrap();
     let uv = tmp.path().join("uv");
     fs::write(
         &uv,
-        "#!/bin/sh\nshift\nif [ \"$1\" = \"--directory\" ]; then dir=\"$2\"; shift 2; fi\n[ \"$1\" = \"--\" ] && shift\ncd \"$dir\" && exec \"$@\"\n",
+        "#!/bin/sh\n[ -n \"$FAKE_UV_LOG\" ] && echo \"$@\" >> \"$FAKE_UV_LOG\"\n[ -n \"$FAKE_UV_FAIL\" ] && exit 1\nexit 0\n",
     )
     .unwrap();
     #[cfg(unix)]
@@ -79,8 +80,19 @@ fn fake_uv_bin() -> (TempDir, String) {
 
 fn ut(dir: &Path, path: &str) -> Command {
     let mut cmd = Command::cargo_bin("ut").unwrap();
-    cmd.current_dir(dir).env("PATH", path).env("NO_COLOR", "1");
+    cmd.current_dir(dir)
+        .env("PATH", path)
+        .env("NO_COLOR", "1")
+        .env_remove("UT_SYNCED")
+        .env_remove("UV_PROJECT_ENVIRONMENT");
     cmd
+}
+
+/// Lines the fake uv logged, i.e. the `uv` invocations ut made.
+fn uv_log(log: &Path) -> Vec<String> {
+    fs::read_to_string(log)
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 fn set_task(root: &Path, pkg: &str, tasks: &str) {
@@ -335,11 +347,15 @@ fn root_task_fans_out_to_members() {
     let (_bin, path) = fake_uv_bin();
     set_root(ws.path(), ROOT_WITH_TASKS);
     set_task(ws.path(), "mid", "test = \"echo tested-mid\"");
+    let log = ws.path().join("uv.log");
 
     let out = ut(ws.path(), &path)
         .args(["run", "test"])
+        .env("FAKE_UV_LOG", &log)
         .assert()
         .success();
+    // The outer ut syncs once; the inner `ut run -w test` sees UT_SYNCED.
+    assert_eq!(uv_log(&log).len(), 1);
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(stdout.contains("zeta | tested-zeta"), "got: {stdout}");
     assert!(stdout.contains("mid  | tested-mid"), "got: {stdout}");
@@ -399,4 +415,109 @@ fn root_task_runs_from_virtual_root() {
         .assert()
         .code(2)
         .stderr(predicates::str::contains("workspace root has no task"));
+}
+
+#[test]
+fn syncs_workspace_once_before_running() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    let log = ws.path().join("uv.log");
+
+    ut(&ws.path().join("pkgs/zeta"), &path)
+        .args(["run", "build"])
+        .env("FAKE_UV_LOG", &log)
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("$ uv sync --all-packages"));
+
+    let root = ws.path().canonicalize().unwrap();
+    let expected = format!("sync --all-packages --directory {}", root.display());
+    assert_eq!(uv_log(&log), vec![expected]);
+}
+
+#[test]
+fn ut_synced_env_skips_sync_for_matching_root_only() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    let root = ws.path().canonicalize().unwrap();
+    let log = ws.path().join("uv.log");
+
+    ut(&ws.path().join("pkgs/zeta"), &path)
+        .args(["run", "build"])
+        .env("FAKE_UV_LOG", &log)
+        .env("UT_SYNCED", &root)
+        .assert()
+        .success();
+    assert_eq!(uv_log(&log).len(), 0);
+
+    // A task that cd'd into a *different* workspace still syncs.
+    ut(&ws.path().join("pkgs/zeta"), &path)
+        .args(["run", "build"])
+        .env("FAKE_UV_LOG", &log)
+        .env("UT_SYNCED", "/elsewhere")
+        .assert()
+        .success();
+    assert_eq!(uv_log(&log).len(), 1);
+}
+
+#[test]
+fn sync_failure_aborts_before_any_task() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+
+    let out = ut(&ws.path().join("pkgs/zeta"), &path)
+        .args(["run", "build"])
+        .env("FAKE_UV_FAIL", "1")
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("uv sync"));
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(!stdout.contains("built-zeta"), "got: {stdout}");
+}
+
+#[test]
+fn list_does_not_sync() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    let log = ws.path().join("uv.log");
+
+    ut(ws.path(), &path)
+        .arg("list")
+        .env("FAKE_UV_LOG", &log)
+        .assert()
+        .success();
+    assert_eq!(uv_log(&log).len(), 0);
+}
+
+#[test]
+fn tasks_get_virtualenv_and_venv_on_path() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    let root = ws.path().canonicalize().unwrap();
+    set_task(
+        ws.path(),
+        "zeta",
+        "env = \"echo venv=$VIRTUAL_ENV path=$PATH\"",
+    );
+
+    let assert_venv = |cmd: &mut Command, venv: &str| {
+        let out = cmd.args(["run", "env"]).assert().success();
+        let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+        assert!(stdout.contains(&format!("venv={venv} ")), "got: {stdout}");
+        assert!(stdout.contains(&format!(":{venv}/bin:")), "got: {stdout}");
+    };
+
+    let default = format!("{}/.venv", root.display());
+    assert_venv(&mut ut(&ws.path().join("pkgs/zeta"), &path), &default);
+
+    // A relative UV_PROJECT_ENVIRONMENT resolves against the workspace root,
+    // an absolute one is used as-is — matching uv.
+    let custom = format!("{}/custom", root.display());
+    let mut cmd = ut(&ws.path().join("pkgs/zeta"), &path);
+    cmd.env("UV_PROJECT_ENVIRONMENT", "custom");
+    assert_venv(&mut cmd, &custom);
+
+    let mut cmd = ut(&ws.path().join("pkgs/zeta"), &path);
+    cmd.env("UV_PROJECT_ENVIRONMENT", "/abs/venv");
+    assert_venv(&mut cmd, "/abs/venv");
 }

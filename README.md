@@ -34,7 +34,7 @@ test = "ut run -w test"                  # run every member's "test"
 check = ["ut run -w lint", "ut run -w test"]
 ```
 
-Commands run through `uv run --directory <package> -- sh -c '<command>'`, so they get the package's environment and full shell semantics. The directory containing `ut` itself is prepended to `PATH`, so task definitions call bare `ut` (as above) even though it only lives in the project venv.
+Before anything runs, `ut` brings the workspace environment up to date with a single `uv sync --all-packages`. Commands then run through `sh -c` in the package's directory with the workspace venv activated (`<venv>/bin` on `PATH`, `VIRTUAL_ENV` set) — no per-command `uv run`, so parallel tasks never contend on uv's sync lock. The directory containing `ut` itself is prepended to `PATH`, so task definitions call bare `ut` (as above) even though it only lives in the project venv; nested `ut` invocations spawned this way skip the redundant sync.
 
 ## Run tasks
 
@@ -69,7 +69,8 @@ Known limitations:
 
 - Tasks run through `sh -c`, so Windows isn't supported.
 - Passthrough args work only for string-form tasks, not sequences.
-- Concurrent `uv run` invocations in one workspace share a venv; uv serializes syncs with a lock. If sync churn becomes a problem, run `uv sync` once and define tasks with `uv run --no-sync`.
+- The venv is synced with `--all-packages`, so every member's dependencies are installed together and a member can import a package it doesn't declare. Per-member dependency isolation (what `uv run --package` gives you) is traded for speed — dependency *versions* were never isolated anyway, since a uv workspace resolves to a single lockfile.
+- The venv is located the way uv locates it: `UV_PROJECT_ENVIRONMENT` if set (relative values resolve against the workspace root), else `<root>/.venv`; an already-activated `VIRTUAL_ENV` is ignored, as uv does by default.
 
 Not yet implemented: task-level `depends`, pre/post hooks, continue-on-error (`--no-bail`), buffered per-package output.
 
