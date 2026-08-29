@@ -7,10 +7,10 @@ uv has no task runner ([astral-sh/uv#5903](https://github.com/astral-sh/uv/issue
 ## Install
 
 ```sh
-uv tool install ut-runner
+uv tool install ut-tasks
 ```
 
-The PyPI distribution is named `ut-runner` (`ut` was taken); the installed command is `ut`. The wheels ship a prebuilt binary for macOS and Linux — no Rust toolchain needed. `pipx install ut-runner` and `pip install ut-runner` work too.
+The PyPI distribution is named `ut-tasks` (`ut` was taken); the installed command is `ut`. The wheels ship a prebuilt binary for macOS and Linux — no Rust toolchain needed. `pipx install ut-tasks` and `pip install ut-tasks` work too.
 
 ## Define tasks
 

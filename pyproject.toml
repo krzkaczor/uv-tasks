@@ -3,7 +3,7 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "ut-runner"
+name = "ut-tasks"
 description = "A task runner for uv workspaces: tasks in pyproject.toml, parallel runs over the workspace dependency graph"
 readme = "README.md"
 license = "MIT"
