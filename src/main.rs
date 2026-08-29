@@ -42,9 +42,9 @@ struct RunCmd {
     /// With -w, only run in the given package(s) (repeatable)
     #[usage(long)]
     filter: Vec<String>,
-    /// Max concurrent tasks (default: logical CPUs; 1 = sequential)
-    #[usage(short = 'j', long)]
-    jobs: Option<usize>,
+    /// Run workspace tasks one at a time instead of in parallel
+    #[usage(short = 's', long)]
+    sequential: bool,
     /// Task name
     task: String,
     /// Extra arguments appended to the task command
@@ -163,7 +163,7 @@ fn run_across_workspace(ws: &Workspace, cmd: &RunCmd) -> Result<i32> {
         })
         .collect::<Result<_>>()?;
 
-    let jobs = cmd.jobs.unwrap_or_else(thread_count).max(1);
+    let jobs = if cmd.sequential { 1 } else { thread_count() };
     run::run_workspace(invocations, jobs)
 }
 
@@ -225,7 +225,7 @@ fn main() {
         (None, Some(task)) => RunCmd {
             workspace: false,
             filter: vec![],
-            jobs: None,
+            sequential: false,
             task,
             args: cli.args,
         }

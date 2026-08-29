@@ -32,7 +32,7 @@ ut test                    # run "test" in the package containing the current di
 ut test -- -k "scope"      # extra args are appended to the command
 ut run -w test             # run "test" in every member that defines it
 ut run -w --filter pkg test  # restrict to the named package(s)
-ut run -w -j 1 test        # limit concurrency (1 = sequential)
+ut run -w -s test          # run sequentially instead of in parallel
 ut list                    # members in dependency order, with their tasks
 ```
 
@@ -44,7 +44,7 @@ ut list                    # members in dependency order, with their tasks
 
 - Discovers members from `[tool.uv.workspace]` in the root `pyproject.toml` (glob `members`, `exclude`, and the root itself when it has a `[project]` table).
 - Builds the dependency graph from `[tool.uv.sources] <name> = { workspace = true }` entries, with requirement-name matching as a fallback.
-- Runs in parallel by default, up to the number of logical CPUs. A member's task starts only after the tasks of all its workspace dependencies succeed — including through members that don't define the task.
+- Runs in parallel by default, up to the number of logical CPUs; pass `-s`/`--sequential` to run one member at a time. A member's task starts only after the tasks of all its workspace dependencies succeed — including through members that don't define the task.
 - Skips members that don't define the task, like `pnpm -r`.
 - Streams output line by line, prefixed with the member name.
 - Fails fast: after the first failure no new tasks start, in-flight tasks finish, and `ut` exits with code 1, listing failed and skipped members.
