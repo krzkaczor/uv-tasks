@@ -107,7 +107,7 @@ fn discover() -> Result<Workspace> {
 
 fn run_task(cmd: RunCmd) -> Result<i32> {
     let ws = discover()?;
-    if !synced_by_parent(&ws.root) {
+    if !synced_by_parent(&ws.root) && !no_sync_requested() {
         run::sync(&ws.root)?;
     }
     let env = run::TaskEnv::new(&ws.root);
@@ -122,6 +122,12 @@ fn run_task(cmd: RunCmd) -> Result<i32> {
 /// spawned task carries UT_SYNCED=<canonical workspace root>.
 fn synced_by_parent(root: &Path) -> bool {
     std::env::var_os("UT_SYNCED").is_some_and(|v| Path::new(&v) == root)
+}
+
+/// UV_NO_SYNC mirrors uv's own env var (the --no-sync flag): any non-empty
+/// value skips the upfront `uv sync`, leaving the environment as-is.
+fn no_sync_requested() -> bool {
+    std::env::var_os("UV_NO_SYNC").is_some_and(|v| !v.is_empty())
 }
 
 fn run_in_current_package(ws: &Workspace, cmd: RunCmd, env: &run::TaskEnv) -> Result<i32> {

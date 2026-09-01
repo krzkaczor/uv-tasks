@@ -47,6 +47,7 @@ fn ut(dir: &Path) -> Command {
     cmd.current_dir(dir)
         .env("PATH", system_path)
         .env("NO_COLOR", "1")
+        .env_remove("UV_NO_SYNC")
         .timeout(Duration::from_secs(600));
     cmd
 }
