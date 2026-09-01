@@ -84,6 +84,7 @@ fn ut(dir: &Path, path: &str) -> Command {
         .env("PATH", path)
         .env("NO_COLOR", "1")
         .env_remove("UT_SYNCED")
+        .env_remove("UV_NO_SYNC")
         .env_remove("UV_PROJECT_ENVIRONMENT");
     cmd
 }
@@ -455,6 +456,31 @@ fn ut_synced_env_skips_sync_for_matching_root_only() {
         .args(["run", "build"])
         .env("FAKE_UV_LOG", &log)
         .env("UT_SYNCED", "/elsewhere")
+        .assert()
+        .success();
+    assert_eq!(uv_log(&log).len(), 1);
+}
+
+#[test]
+fn uv_no_sync_env_skips_sync() {
+    let ws = fixture();
+    let (_bin, path) = fake_uv_bin();
+    let log = ws.path().join("uv.log");
+
+    ut(&ws.path().join("pkgs/zeta"), &path)
+        .args(["run", "build"])
+        .env("FAKE_UV_LOG", &log)
+        .env("UV_NO_SYNC", "1")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("built-zeta"));
+    assert_eq!(uv_log(&log).len(), 0);
+
+    // An empty value does not count as set, matching uv.
+    ut(&ws.path().join("pkgs/zeta"), &path)
+        .args(["run", "build"])
+        .env("FAKE_UV_LOG", &log)
+        .env("UV_NO_SYNC", "")
         .assert()
         .success();
     assert_eq!(uv_log(&log).len(), 1);

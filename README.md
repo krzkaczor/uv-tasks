@@ -34,7 +34,7 @@ test = "ut run -w test"                  # run every member's "test"
 check = ["ut run -w lint", "ut run -w test"]
 ```
 
-Before anything runs, `ut` brings the workspace environment up to date with a single `uv sync --all-packages`. Commands then run through `sh -c` in the package's directory with the workspace venv activated (`<venv>/bin` on `PATH`, `VIRTUAL_ENV` set) — no per-command `uv run`, so parallel tasks never contend on uv's sync lock. The directory containing `ut` itself is prepended to `PATH`, so task definitions call bare `ut` (as above) even though it only lives in the project venv; nested `ut` invocations spawned this way skip the redundant sync.
+Before anything runs, `ut` brings the workspace environment up to date with a single `uv sync --all-packages`. Commands then run through `sh -c` in the package's directory with the workspace venv activated (`<venv>/bin` on `PATH`, `VIRTUAL_ENV` set) — no per-command `uv run`, so parallel tasks never contend on uv's sync lock. The directory containing `ut` itself is prepended to `PATH`, so task definitions call bare `ut` (as above) even though it only lives in the project venv; nested `ut` invocations spawned this way skip the redundant sync. Set `UV_NO_SYNC` (uv's own env var) to any non-empty value to skip the upfront sync and use the environment as-is.
 
 ## Run tasks
 
